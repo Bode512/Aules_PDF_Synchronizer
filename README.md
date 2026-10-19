@@ -1,5 +1,7 @@
 # Aules PDF Synchronizer
 
+![Aules PDF Synchronizer foto](image.png)
+
 Aplicación de escritorio en Python para descargar y organizar automáticamente los archivos PDF de tus asignaturas en Aules (Moodle de la Generalitat Valenciana).
 
 ## Características
