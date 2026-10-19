@@ -37,7 +37,8 @@ python main.py
 ## Ejecutable para Windows
 
 El ejecutable ya compilado se encuentra en `release/Aules_PDF_Synchronizer.exe`.
-No requiere Python instalado. Google Chrome debe estar instalado y se necesita
+Incluye Python y las dependencias de la aplicación, por lo que no hace falta
+instalar Python ni Selenium. Google Chrome debe estar instalado; se necesita
 conexión a Internet para descargar el controlador compatible y acceder a Aules.
 El `.exe` de esta versión también está disponible en [GitHub Releases](https://github.com/Bode512/Aules_PDF_Synchronizer/releases/tag/v1.1.50).
 
@@ -50,13 +51,16 @@ python -m pip install -r requirements.txt
 python -m pip install -r requirements-build.txt
 python -m PyInstaller --clean --noconfirm --onefile --windowed `
   --name Aules_PDF_Synchronizer --icon image.ico `
-  --add-data "image.ico;." --distpath release --workpath build `
+  --add-data "image.ico;." --collect-all selenium `
+  --collect-all webdriver_manager --distpath release --workpath build `
   main.py
 ```
 
 La compilación genera `release/Aules_PDF_Synchronizer.exe`, con el icono de
-`image.png` convertido a `image.ico`. La aplicación requiere Chrome; para
-completar MFA o CAPTCHA, utiliza el modo navegador visible.
+`image.png` convertido a `image.ico`. Se recopilan explícitamente los módulos
+de Selenium que se cargan dinámicamente para evitar errores de importación en
+el ejecutable. La aplicación requiere Chrome; para completar MFA o CAPTCHA,
+utiliza el modo navegador visible.
 
 ## Preparar un release
 

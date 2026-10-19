@@ -106,7 +106,8 @@ try {
     Write-Host "Compilando el ejecutable v$Version..."
     & $python -m PyInstaller --clean --noconfirm --onefile --windowed `
         --name Aules_PDF_Synchronizer --icon image.ico `
-        --add-data "image.ico;." --distpath release --workpath build `
+        --add-data "image.ico;." --collect-all selenium `
+        --collect-all webdriver_manager --distpath release --workpath build `
         main.py
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller no pudo crear el ejecutable."
