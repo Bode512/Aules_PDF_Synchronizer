@@ -4,7 +4,9 @@ Todo lo específico de la estructura HTML está parametrizado vía config.SELECT
 """
 
 import logging
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Callable, Dict
@@ -53,6 +55,7 @@ class CourseInfo:
 @dataclass
 class SyncStats:
     courses_analyzed: int = 0
+    orientation_courses_skipped: int = 0
     sections_processed: int = 0
     files_found: int = 0
     downloaded: int = 0
@@ -213,6 +216,12 @@ class AulesClient:
         cookies = self.driver.get_cookies()
         self.downloader = AuthenticatedDownloader(cookies, self.base_url)
 
+    @staticmethod
+    def _is_orientation_course(course_name: str) -> bool:
+        normalized = unicodedata.normalize("NFKD", course_name)
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        return re.search(r"\borientacion\b", normalized.casefold()) is not None
+
     def get_courses(self) -> List[CourseInfo]:
         """Extrae la lista de cursos visibles en el área personal."""
         self._emit("Buscando asignaturas disponibles...")
@@ -361,6 +370,18 @@ class AulesClient:
                 return stats
 
             courses = self.get_courses()
+            orientation_courses = [
+                course for course in courses if self._is_orientation_course(course.name)
+            ]
+            stats.orientation_courses_skipped = len(orientation_courses)
+            if orientation_courses:
+                self._emit(
+                    f"Se omiten {len(orientation_courses)} asignatura(s) de Orientación, "
+                    "según la configuración solicitada."
+                )
+            courses = [
+                course for course in courses if not self._is_orientation_course(course.name)
+            ]
             stats.courses_analyzed = len(courses)
 
             for course in courses:

@@ -20,7 +20,7 @@ class AulesDownloaderApp(ctk.CTk):
         super().__init__()
 
         self.iconbitmap(str(Path(__file__).with_name("image.ico")))
-        self.title(f"Aules PDF Synchronizer {APP_VERSION}")
+        self.title(f"Aules PDF Synchronizer v{APP_VERSION}")
         self.geometry("900x700")
         self.minsize(800, 600)
 
@@ -229,6 +229,7 @@ class AulesDownloaderApp(ctk.CTk):
         return (
             f"\n========== RESUMEN ({status}) ==========\n"
             f"Asignaturas analizadas : {stats.courses_analyzed}\n"
+            f"Orientación omitida    : {stats.orientation_courses_skipped}\n"
             f"Secciones procesadas   : {stats.sections_processed}\n"
             f"Archivos encontrados   : {stats.files_found}\n"
             f"Descargados            : {stats.downloaded}\n"

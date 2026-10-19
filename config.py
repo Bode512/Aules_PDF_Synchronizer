@@ -12,7 +12,7 @@ Ajusta aquí URLs, selectores y preferencias cuando cambie la estructura de Aule
 #   https://aules.edu.gva.es/primaria/
 #   etc. (ver portal.edu.gva.es/aules)
 DEFAULT_BASE_URL = "https://aules.edu.gva.es/batxillerat/"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.50"
 
 # Rutas relativas habituales de Moodle
 LOGIN_PATH = "login/index.php"

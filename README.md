@@ -1,4 +1,4 @@
-# Aules PDF Synchronizer 1.1.0
+# Aules PDF Synchronizer 1.1.50
 
 ![Aules PDF Synchronizer foto](image.png)
 
@@ -10,6 +10,8 @@ Aplicación de escritorio para descargar y organizar automáticamente los materi
 - Autenticación compatible con el flujo de Aules / GVA (modo visible para MFA o verificaciones adicionales).
 - Organización automática por asignatura y sección/tema.
 - Descarga y organización de archivos PDF, Word, PowerPoint, Excel, OpenDocument, RTF, TXT y CSV.
+- Mantiene el nombre y la extensión original del archivo descargado.
+- Omite las asignaturas cuyo nombre contiene «Orientación».
 - Evita duplicados (no redescarga archivos existentes).
 - Descargas autenticadas, validación de archivos y reintentos.
 - Registro detallado en tiempo real y resumen final.
@@ -37,7 +39,7 @@ python main.py
 El ejecutable ya compilado se encuentra en `release/Aules_PDF_Synchronizer.exe`.
 No requiere Python instalado. Google Chrome debe estar instalado y se necesita
 conexión a Internet para descargar el controlador compatible y acceder a Aules.
-También puedes descargar la versión publicada desde [GitHub Releases](https://github.com/Bode512/Aules_PDF_Synchronizer/releases/latest).
+El `.exe` de esta versión también está disponible en [GitHub Releases](https://github.com/Bode512/Aules_PDF_Synchronizer/releases/tag/v1.1.50).
 
 Para compilarlo de nuevo en Windows:
 
@@ -71,7 +73,12 @@ completar MFA o CAPTCHA, utiliza el modo navegador visible.
 
 - La estructura exacta de las tarjetas de curso y de las secciones puede variar entre sabores y versiones de Moodle (4.5 → 5.2). Por eso todos los selectores están en `config.py`. Si tras una actualización dejan de detectarse cursos o archivos, inspecciona la página y actualiza únicamente esos selectores.
 - No se implementa comparación avanzada de contenido (hash/ETag) para decidir si un archivo remoto ha cambiado, para no generar carga innecesaria sobre los servidores de Aules. Si el archivo local existe y tiene tamaño > 0 se omite.
+- Las esperas indicadas en la consola son pausas breves antes de reintentar tras un error temporal. Los errores de acceso denegado se notifican inmediatamente y no se reintentan.
 - El programa no ha sido ejecutado de extremo a extremo con credenciales reales en este entorno (no dispongo de una cuenta de Aules). La lógica de login se ha verificado contra la página de login real de un sabor público y los selectores estándar de Moodle 4.x.
 - Respeta siempre los términos de uso de la plataforma y utiliza la herramienta únicamente con tu propia cuenta y para material al que tengas derecho de acceso.
 
 Con estos archivos tienes una aplicación de escritorio completa, modular y preparada para adaptarse a los cambios habituales de Aules. Si tras probarla encuentras que algún selector concreto ha cambiado en tu sabor, indícalo y te ayudo a ajustarlo.
+
+
+#ESTE app fue hecho por grok.com y gpt-6-luna -> OpenAI.com
+##quien arreglaba los errores es copilot

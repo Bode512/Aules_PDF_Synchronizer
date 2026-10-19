@@ -6,9 +6,10 @@ import logging
 import mimetypes
 import time
 from email.message import Message
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional, Callable
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse, parse_qs
 
 import requests
 
@@ -29,6 +30,19 @@ from file_manager import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _MoodleFileLinkParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.urls = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        for attribute in ("href", "src", "data"):
+            value = attributes.get(attribute)
+            if value:
+                self.urls.append(value)
 
 
 class DownloadResult:
@@ -122,6 +136,87 @@ class AuthenticatedDownloader:
                 return False
         return False
 
+    @staticmethod
+    def _find_file_url(html: str, page_url: str) -> Optional[str]:
+        parser = _MoodleFileLinkParser()
+        parser.feed(html)
+        page_host = urlparse(page_url).hostname
+
+        for value in parser.urls:
+            candidate = urljoin(page_url, value)
+            parsed = urlparse(candidate)
+            if parsed.hostname != page_host:
+                continue
+            extension = Path(unquote(parsed.path)).suffix.lower()
+            if extension not in SUPPORTED_FILE_EXTENSIONS:
+                query_filename = parse_qs(parsed.query).get("filename", [""])[0]
+                extension = Path(unquote(query_filename)).suffix.lower()
+            if extension in SUPPORTED_FILE_EXTENSIONS:
+                return candidate
+        return None
+
+    def _save_response(
+        self,
+        response: requests.Response,
+        dest_path: Path,
+        cancel_check: Optional[Callable[[], bool]],
+        on_progress: Optional[Callable[[str], None]],
+    ) -> DownloadResult:
+        if response.status_code in (401, 403):
+            if on_progress:
+                on_progress(
+                    f"Acceso denegado (HTTP {response.status_code}); no se reintenta. "
+                    "Comprueba la sesión o los permisos del recurso."
+                )
+            return DownloadResult(
+                success=False,
+                error=f"Acceso denegado (HTTP {response.status_code}). Sesión posiblemente caducada.",
+            )
+        if response.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {response.status_code}")
+
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "text/html" in content_type:
+            return DownloadResult(
+                success=False,
+                error="La URL del recurso devuelve HTML en lugar del archivo.",
+            )
+
+        filename = self._response_filename(response, dest_path.name)
+        extension = Path(filename).suffix.lower()
+        if extension not in SUPPORTED_FILE_EXTENSIONS:
+            return DownloadResult(
+                success=False,
+                error=f"Formato no compatible: {extension or 'sin extensión'}.",
+            )
+
+        requested_path = dest_path.parent / filename
+        if requested_path.exists() and requested_path.stat().st_size > 0:
+            return DownloadResult(success=True, path=requested_path, skipped=True)
+        final_path = ensure_unique_path(requested_path)
+
+        temp_path = create_temp_file(extension)
+        try:
+            size = 0
+            with open(temp_path, "wb") as file:
+                for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+                    if cancel_check and cancel_check():
+                        return DownloadResult(success=False, error="Cancelado por el usuario")
+                    if chunk:
+                        file.write(chunk)
+                        size += len(chunk)
+
+            if not self._is_valid_file(temp_path, extension):
+                return DownloadResult(
+                    success=False,
+                    error=f"El contenido descargado no es un archivo {extension} válido.",
+                )
+
+            move_temp_to_final(temp_path, final_path)
+            return DownloadResult(success=True, path=final_path, size=size)
+        finally:
+            cleanup_temp(temp_path)
+
     def download(
         self,
         url: str,
@@ -161,62 +256,57 @@ class AuthenticatedDownloader:
                     timeout=REQUEST_TIMEOUT,
                     allow_redirects=True,
                 ) as resp:
-                    if resp.status_code in (401, 403):
-                        return DownloadResult(
-                            success=False,
-                            error=f"Acceso denegado (HTTP {resp.status_code}). Sesión posiblemente caducada.",
-                        )
-                    if resp.status_code >= 400:
-                        last_error = f"HTTP {resp.status_code}"
-                        raise requests.HTTPError(last_error)
-
-                    # Comprobar Content-Type antes de guardar todo
                     content_type = resp.headers.get("Content-Type", "").lower()
                     if "text/html" in content_type:
-                        return DownloadResult(
-                            success=False,
-                            error="Respuesta HTML en lugar de un archivo (posible sesión caducada o enlace de visualización).",
+                        if resp.status_code in (401, 403):
+                            return self._save_response(
+                                resp,
+                                dest_path,
+                                cancel_check,
+                                on_progress,
+                            )
+                        file_url = self._find_file_url(resp.text, resp.url)
+                        if not file_url:
+                            return DownloadResult(
+                                success=False,
+                                error="No se encontró un enlace al archivo dentro del recurso de Moodle.",
+                            )
+                        if on_progress:
+                            on_progress("Recurso de Moodle localizado; descargando el archivo original...")
+                    else:
+                        return self._save_response(
+                            resp,
+                            dest_path,
+                            cancel_check,
+                            on_progress,
                         )
 
-                    filename = self._response_filename(resp, dest_path.name)
-                    extension = Path(filename).suffix.lower()
-                    if extension not in SUPPORTED_FILE_EXTENSIONS:
-                        return DownloadResult(
-                            success=False,
-                            error=f"Formato no compatible: {extension or 'sin extensión'}.",
-                        )
-
-                    requested_path = dest_path.parent / filename
-                    if requested_path.exists() and requested_path.stat().st_size > 0:
-                        return DownloadResult(success=True, path=requested_path, skipped=True)
-                    final_path = ensure_unique_path(requested_path)
-
-                    temp_path = create_temp_file(extension)
-                    size = 0
-                    with open(temp_path, "wb") as f:
-                        for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
-                            if cancel_check and cancel_check():
-                                cleanup_temp(temp_path)
-                                return DownloadResult(success=False, error="Cancelado por el usuario")
-                            if chunk:
-                                f.write(chunk)
-                                size += len(chunk)
-
-                    if not self._is_valid_file(temp_path, extension):
-                        cleanup_temp(temp_path)
-                        return DownloadResult(
-                            success=False,
-                            error=f"El contenido descargado no es un archivo {extension} válido.",
-                        )
-
-                    move_temp_to_final(temp_path, final_path)
-                    return DownloadResult(success=True, path=final_path, size=size)
+                with self.session.get(
+                    file_url,
+                    stream=True,
+                    timeout=REQUEST_TIMEOUT,
+                    allow_redirects=True,
+                ) as file_response:
+                    return self._save_response(
+                        file_response,
+                        dest_path,
+                        cancel_check,
+                        on_progress,
+                    )
 
             except Exception as e:
                 last_error = str(e)
-                cleanup_temp(temp_path)
                 logger.warning("Error en intento %s de descarga de %s: %s", attempt, url, e)
                 if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_BACKOFF_BASE ** attempt)
+                    wait_seconds = int(RETRY_BACKOFF_BASE ** attempt)
+                    for remaining in range(wait_seconds, 0, -1):
+                        if cancel_check and cancel_check():
+                            return DownloadResult(success=False, error="Cancelado por el usuario")
+                        if on_progress:
+                            on_progress(
+                                f"Esperando {remaining} s antes de reintentar "
+                                f"({attempt + 1}/{MAX_RETRIES}). Motivo: {last_error}"
+                            )
+                        time.sleep(1)
 
         return DownloadResult(success=False, error=last_error or "Error desconocido")
