@@ -3,10 +3,12 @@ Descargas HTTP fiables con sesión autenticada, validación de PDF y reintentos.
 """
 
 import logging
+import mimetypes
 import time
+from email.message import Message
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable
-from urllib.parse import urljoin, urlparse
+from typing import Optional, Callable
+from urllib.parse import unquote, urljoin, urlparse
 
 import requests
 
@@ -15,9 +17,16 @@ from config import (
     RETRY_BACKOFF_BASE,
     REQUEST_TIMEOUT,
     CHUNK_SIZE,
+    SUPPORTED_FILE_EXTENSIONS,
     USER_AGENT,
 )
-from file_manager import create_temp_file, move_temp_to_final, cleanup_temp
+from file_manager import (
+    create_temp_file,
+    ensure_unique_path,
+    move_temp_to_final,
+    cleanup_temp,
+    sanitize_filename,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +56,7 @@ class AuthenticatedDownloader:
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": USER_AGENT,
-            "Accept": "application/pdf,application/octet-stream,*/*",
+            "Accept": "application/octet-stream,*/*",
             "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
         })
         self.base_url = base_url.rstrip("/") + "/"
@@ -61,14 +70,57 @@ class AuthenticatedDownloader:
                 path=cookie.get("path", "/"),
             )
 
-    def is_pdf_content(self, response: requests.Response) -> bool:
-        """Comprueba de forma robusta si la respuesta es realmente un PDF."""
-        content_type = response.headers.get("Content-Type", "").lower()
-        if "application/pdf" in content_type:
-            return True
-        # Algunos servidores no envían Content-Type correcto; miramos la firma mágica
-        content = response.content[:8] if response.content else b""
-        return content.startswith(b"%PDF")
+    @staticmethod
+    def _response_filename(response: requests.Response, fallback: str) -> str:
+        content_disposition = response.headers.get("Content-Disposition", "")
+        if content_disposition:
+            disposition = Message()
+            disposition["content-disposition"] = content_disposition
+            filename = disposition.get_filename()
+            if filename:
+                filename = unquote(filename)
+                if Path(filename).suffix.lower() in SUPPORTED_FILE_EXTENSIONS:
+                    return sanitize_filename(Path(filename).name)
+
+        url_name = unquote(Path(urlparse(response.url).path).name)
+        if Path(url_name).suffix.lower() in SUPPORTED_FILE_EXTENSIONS:
+            return sanitize_filename(url_name)
+
+        fallback_name = sanitize_filename(fallback)
+        if Path(fallback_name).suffix.lower() in SUPPORTED_FILE_EXTENSIONS:
+            return fallback_name
+
+        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        extension = mimetypes.guess_extension(content_type) if content_type else None
+        if content_type == "application/rtf":
+            extension = ".rtf"
+        if extension in SUPPORTED_FILE_EXTENSIONS:
+            return sanitize_filename(f"{fallback_name}.{extension.lstrip('.')}")
+        return fallback_name
+
+    @staticmethod
+    def _is_valid_file(path: Path, extension: str) -> bool:
+        with open(path, "rb") as file:
+            content = file.read(4096)
+        signature = content[:8]
+        if content.lstrip().lower().startswith((b"<!doctype html", b"<html")):
+            return False
+
+        if extension == ".pdf":
+            return signature.startswith(b"%PDF")
+        if extension in {".doc", ".ppt", ".xls"}:
+            return signature.startswith(bytes.fromhex("D0CF11E0A1B11AE1"))
+        if extension in {".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods"}:
+            return signature.startswith(b"PK")
+        if extension == ".rtf":
+            return signature.startswith(b"{\\rtf")
+        if extension in {".txt", ".csv"}:
+            try:
+                content.decode("utf-8-sig")
+                return True
+            except UnicodeDecodeError:
+                return False
+        return False
 
     def download(
         self,
@@ -80,7 +132,7 @@ class AuthenticatedDownloader:
         """
         Descarga un recurso a dest_path.
         - Si el archivo ya existe, se omite.
-        - Descarga a temporal y mueve solo si es PDF válido.
+        - Descarga a temporal y valida la firma según la extensión.
         - Reintentos con backoff.
         """
         if dest_path.exists() and dest_path.stat().st_size > 0:
@@ -120,14 +172,26 @@ class AuthenticatedDownloader:
 
                     # Comprobar Content-Type antes de guardar todo
                     content_type = resp.headers.get("Content-Type", "").lower()
-                    if "text/html" in content_type and "pdf" not in content_type:
-                        # Probablemente página de login o error
+                    if "text/html" in content_type:
                         return DownloadResult(
                             success=False,
-                            error="Respuesta HTML en lugar de PDF (posible sesión caducada o enlace de visualización).",
+                            error="Respuesta HTML en lugar de un archivo (posible sesión caducada o enlace de visualización).",
                         )
 
-                    temp_path = create_temp_file(".pdf")
+                    filename = self._response_filename(resp, dest_path.name)
+                    extension = Path(filename).suffix.lower()
+                    if extension not in SUPPORTED_FILE_EXTENSIONS:
+                        return DownloadResult(
+                            success=False,
+                            error=f"Formato no compatible: {extension or 'sin extensión'}.",
+                        )
+
+                    requested_path = dest_path.parent / filename
+                    if requested_path.exists() and requested_path.stat().st_size > 0:
+                        return DownloadResult(success=True, path=requested_path, skipped=True)
+                    final_path = ensure_unique_path(requested_path)
+
+                    temp_path = create_temp_file(extension)
                     size = 0
                     with open(temp_path, "wb") as f:
                         for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
@@ -138,18 +202,15 @@ class AuthenticatedDownloader:
                                 f.write(chunk)
                                 size += len(chunk)
 
-                    # Validar que es PDF
-                    with open(temp_path, "rb") as f:
-                        header = f.read(8)
-                    if not header.startswith(b"%PDF"):
+                    if not self._is_valid_file(temp_path, extension):
                         cleanup_temp(temp_path)
                         return DownloadResult(
                             success=False,
-                            error="El contenido descargado no es un PDF válido.",
+                            error=f"El contenido descargado no es un archivo {extension} válido.",
                         )
 
-                    move_temp_to_final(temp_path, dest_path)
-                    return DownloadResult(success=True, path=dest_path, size=size)
+                    move_temp_to_final(temp_path, final_path)
+                    return DownloadResult(success=True, path=final_path, size=size)
 
             except Exception as e:
                 last_error = str(e)

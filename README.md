@@ -1,16 +1,17 @@
-# Aules PDF Synchronizer
+# Aules PDF Synchronizer 1.1.0
 
 ![Aules PDF Synchronizer foto](image.png)
 
-Aplicación de escritorio en Python para descargar y organizar automáticamente los archivos PDF de tus asignaturas en Aules (Moodle de la Generalitat Valenciana).
+Aplicación de escritorio para descargar y organizar automáticamente los materiales de tus asignaturas en Aules (Moodle de la Generalitat Valenciana).
 
 ## Características
 
 - Interfaz moderna con CustomTkinter (tema claro/oscuro).
 - Autenticación compatible con el flujo de Aules / GVA (modo visible para MFA o verificaciones adicionales).
 - Organización automática por asignatura y sección/tema.
+- Descarga y organización de archivos PDF, Word, PowerPoint, Excel, OpenDocument, RTF, TXT y CSV.
 - Evita duplicados (no redescarga archivos existentes).
-- Descarga con validación real de PDF y reintentos.
+- Descargas autenticadas, validación de archivos y reintentos.
 - Registro detallado en tiempo real y resumen final.
 - Selectores y URL base configurables para adaptarse a cambios de Moodle.
 
@@ -36,6 +37,7 @@ python main.py
 El ejecutable ya compilado se encuentra en `release/Aules_PDF_Synchronizer.exe`.
 No requiere Python instalado. Google Chrome debe estar instalado y se necesita
 conexión a Internet para descargar el controlador compatible y acceder a Aules.
+También puedes descargar la versión publicada desde [GitHub Releases](https://github.com/Bode512/Aules_PDF_Synchronizer/releases/latest).
 
 Para compilarlo de nuevo en Windows:
 
@@ -61,15 +63,14 @@ completar MFA o CAPTCHA, utiliza el modo navegador visible.
 3. Se espera a la aparición del menú de usuario o del dashboard. Si aparece una redirección a servicios de identidad GVA, en modo visible el usuario puede completarla manualmente.
 4. Se copian las cookies de Selenium a una sesión `requests`.
 5. Se visita el área personal (`/my/`), se extraen los enlaces a `course/view.php`.
-6. Por cada curso se recorren las secciones y se buscan enlaces a recursos (`mod/resource` o `pluginfile.php` con indicios de PDF).
-7. Para cada PDF se construye la ruta `Asignatura/Sección/archivo.pdf`, se comprueba si ya existe y, si no, se descarga a un temporal, se valida la firma `%PDF` y se mueve a la ubicación definitiva.
+6. Por cada curso se recorren las secciones y se buscan recursos de archivo de Moodle.
+7. Se descargan los formatos compatibles a un temporal, se valida su tipo y se guardan en `Asignatura/Sección/archivo.ext`; los enlaces intermedios de Moodle se resuelven mediante la sesión HTTP autenticada.
 8. Todo el progreso se envía a la GUI mediante una cola thread-safe.
 
 **Limitaciones conocidas y posibles ajustes**
 
-- La estructura exacta de las tarjetas de curso y de las secciones puede variar entre sabores y versiones de Moodle (4.5 → 5.2). Por eso todos los selectores están en `config.py`. Si tras una actualización dejan de detectarse cursos o PDFs, inspecciona la página y actualiza únicamente esos selectores.
-- Algunos recursos de Moodle muestran primero una página intermedia de “visualización”; el cliente intenta resolver la URL directa de `pluginfile.php`, pero en casos raros puede fallar.
-- No se implementa comparación avanzada de contenido (hash/ETag) para decidir si un PDF remoto ha cambiado, para no generar carga innecesaria sobre los servidores de Aules. Si el archivo local existe y tiene tamaño > 0 se omite.
+- La estructura exacta de las tarjetas de curso y de las secciones puede variar entre sabores y versiones de Moodle (4.5 → 5.2). Por eso todos los selectores están en `config.py`. Si tras una actualización dejan de detectarse cursos o archivos, inspecciona la página y actualiza únicamente esos selectores.
+- No se implementa comparación avanzada de contenido (hash/ETag) para decidir si un archivo remoto ha cambiado, para no generar carga innecesaria sobre los servidores de Aules. Si el archivo local existe y tiene tamaño > 0 se omite.
 - El programa no ha sido ejecutado de extremo a extremo con credenciales reales en este entorno (no dispongo de una cuenta de Aules). La lógica de login se ha verificado contra la página de login real de un sabor público y los selectores estándar de Moodle 4.x.
 - Respeta siempre los términos de uso de la plataforma y utiliza la herramienta únicamente con tu propia cuenta y para material al que tengas derecho de acceso.
 

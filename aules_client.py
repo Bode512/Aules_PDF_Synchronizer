@@ -6,8 +6,9 @@ Todo lo específico de la estructura HTML está parametrizado vía config.SELECT
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Callable, Dict, Any
-from urllib.parse import urljoin, urlparse, parse_qs
+from pathlib import Path
+from typing import List, Optional, Callable, Dict
+from urllib.parse import unquote, urljoin, urlparse
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -18,7 +19,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import (
     TimeoutException,
     NoSuchElementException,
-    WebDriverException,
 )
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -27,6 +27,7 @@ from config import (
     LOGIN_PATH,
     MY_COURSES_PATH,
     SELECTORS,
+    SUPPORTED_FILE_EXTENSIONS,
 )
 from downloader import AuthenticatedDownloader, DownloadResult
 from file_manager import build_destination_path, sanitize_filename
@@ -53,7 +54,7 @@ class CourseInfo:
 class SyncStats:
     courses_analyzed: int = 0
     sections_processed: int = 0
-    pdfs_found: int = 0
+    files_found: int = 0
     downloaded: int = 0
     skipped_existing: int = 0
     failed: int = 0
@@ -247,7 +248,7 @@ class AulesClient:
         return result
 
     def extract_resources_from_course(self, course: CourseInfo) -> List[ResourceInfo]:
-        """Navega al curso y extrae enlaces a recursos PDF."""
+        """Navega al curso y extrae enlaces a documentos compatibles."""
         if self.is_cancelled():
             return []
 
@@ -296,15 +297,17 @@ class AulesClient:
                     text = (link.text or "").strip()
                     if not href or href in seen_urls:
                         continue
-                    # Filtrar solo posibles PDFs o recursos de archivo
-                    lower = (href + " " + text).lower()
-                    if not (".pdf" in lower or "resource/view" in href or "pluginfile" in href):
+                    url_extension = Path(unquote(urlparse(href).path)).suffix.lower()
+                    text_extension = Path(text).suffix.lower()
+                    is_moodle_resource = "/mod/resource/view.php" in href
+                    if not (
+                        url_extension in SUPPORTED_FILE_EXTENSIONS
+                        or text_extension in SUPPORTED_FILE_EXTENSIONS
+                        or is_moodle_resource
+                    ):
                         continue
 
-                    # Nombre del archivo
-                    name = text or self._guess_filename_from_url(href) or "documento.pdf"
-                    if not name.lower().endswith(".pdf"):
-                        name += ".pdf"
+                    name = text or self._guess_filename_from_url(href) or "recurso"
 
                     seen_urls.add(href)
                     resources.append(
@@ -318,55 +321,23 @@ class AulesClient:
                 except Exception:
                     continue
 
-        self._emit(f"  PDF encontrados en {course.name}: {len(resources)}")
+        self._emit(f"  Archivos compatibles en {course.name}: {len(resources)}")
         return resources
 
     def _guess_filename_from_url(self, url: str) -> Optional[str]:
         try:
-            path = urlparse(url).path
+            path = unquote(urlparse(url).path)
             name = path.split("/")[-1]
-            if name.lower().endswith(".pdf"):
+            if Path(name).suffix.lower() in SUPPORTED_FILE_EXTENSIONS:
                 return name
-            # pluginfile.php/.../filename.pdf
             if "pluginfile.php" in path:
                 parts = path.split("/")
                 for p in reversed(parts):
-                    if p.lower().endswith(".pdf"):
+                    if Path(p).suffix.lower() in SUPPORTED_FILE_EXTENSIONS:
                         return p
         except Exception:
             pass
         return None
-
-    def resolve_direct_pdf_url(self, resource_url: str) -> Optional[str]:
-        """
-        Algunos recursos de Moodle muestran una página intermedia.
-        Intentamos obtener la URL final del PDF (pluginfile.php o forcedownload).
-        """
-        try:
-            self.driver.get(resource_url)
-            time.sleep(1.0)
-            # Buscar enlace de descarga directa o iframe
-            for sel in [
-                "a[href*='pluginfile.php']",
-                "a[href*='forcedownload=1']",
-                "a.btn[href*='.pdf']",
-                "object[data*='.pdf']",
-                "embed[src*='.pdf']",
-            ]:
-                try:
-                    el = self.driver.find_element(By.CSS_SELECTOR, sel)
-                    href = el.get_attribute("href") or el.get_attribute("data") or el.get_attribute("src")
-                    if href and (".pdf" in href.lower() or "pluginfile" in href):
-                        return href
-                except NoSuchElementException:
-                    continue
-            # Si la URL actual ya es el PDF
-            current = self.driver.current_url
-            if ".pdf" in current.lower() or "pluginfile.php" in current:
-                return current
-        except Exception as e:
-            logger.debug("No se pudo resolver URL directa: %s", e)
-        return resource_url  # devolver la original y que el downloader intente
 
     def sync(
         self,
@@ -399,7 +370,7 @@ class AulesClient:
                     break
 
                 resources = self.extract_resources_from_course(course)
-                stats.pdfs_found += len(resources)
+                stats.files_found += len(resources)
 
                 # Contar secciones aproximadas
                 sections = {r.section for r in resources if r.section}
@@ -415,11 +386,8 @@ class AulesClient:
                         base, res.course_name, res.section, res.name
                     )
 
-                    # Intentar resolver URL directa
-                    direct_url = self.resolve_direct_pdf_url(res.url)
-
                     result: DownloadResult = self.downloader.download(
-                        direct_url or res.url,
+                        res.url,
                         final_path,
                         cancel_check=self.is_cancelled,
                         on_progress=lambda m: self._emit(m),

@@ -12,7 +12,7 @@ from typing import Optional
 import customtkinter as ctk
 
 from aules_client import AulesClient, SyncStats
-from config import DEFAULT_BASE_URL
+from config import APP_VERSION, DEFAULT_BASE_URL
 
 
 class AulesDownloaderApp(ctk.CTk):
@@ -20,7 +20,7 @@ class AulesDownloaderApp(ctk.CTk):
         super().__init__()
 
         self.iconbitmap(str(Path(__file__).with_name("image.ico")))
-        self.title("Aules PDF Synchronizer")
+        self.title(f"Aules PDF Synchronizer {APP_VERSION}")
         self.geometry("900x700")
         self.minsize(800, 600)
 
@@ -230,7 +230,7 @@ class AulesDownloaderApp(ctk.CTk):
             f"\n========== RESUMEN ({status}) ==========\n"
             f"Asignaturas analizadas : {stats.courses_analyzed}\n"
             f"Secciones procesadas   : {stats.sections_processed}\n"
-            f"PDF encontrados        : {stats.pdfs_found}\n"
+            f"Archivos encontrados   : {stats.files_found}\n"
             f"Descargados            : {stats.downloaded}\n"
             f"Omitidos (ya existían) : {stats.skipped_existing}\n"
             f"Fallidos               : {stats.failed}\n"

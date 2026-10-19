@@ -90,15 +90,11 @@ def build_destination_path(
 ) -> Path:
     """
     Construye la ruta final siguiendo la estructura:
-    base_dir / Asignatura / Tema o "Sin sección" / archivo.pdf
+    base_dir / Asignatura / Tema o "Sin sección" / archivo
     """
     course_safe = sanitize_filename(course_name)
     section_safe = sanitize_filename(section_name) if section_name else NO_SECTION_FOLDER
     file_safe = sanitize_filename(filename)
-
-    # Asegurar extensión .pdf si falta
-    if not file_safe.lower().endswith(".pdf"):
-        file_safe += ".pdf"
 
     dest_dir = base_dir / course_safe / section_safe
     dest_dir.mkdir(parents=True, exist_ok=True)

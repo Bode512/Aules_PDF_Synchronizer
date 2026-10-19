@@ -12,6 +12,7 @@ Ajusta aquí URLs, selectores y preferencias cuando cambie la estructura de Aule
 #   https://aules.edu.gva.es/primaria/
 #   etc. (ver portal.edu.gva.es/aules)
 DEFAULT_BASE_URL = "https://aules.edu.gva.es/batxillerat/"
+APP_VERSION = "1.1.0"
 
 # Rutas relativas habituales de Moodle
 LOGIN_PATH = "login/index.php"
@@ -41,7 +42,24 @@ SELECTORS = {
     "section_name": ".sectionname, .section-title, h3.sectionname, .section-header h3",
     "activity": ".activity, .activity-item, [data-region='activity-item']",
     "resource_link": "a[href*='/mod/resource/view.php'], a[href*='pluginfile.php']",
-    "file_link_pdf": "a[href*='.pdf'], a[href*='forcedownload=1']",
+    "file_link": "a[href*='pluginfile.php'], a[href*='forcedownload=1']",
+}
+
+# Formatos de recursos que se guardan junto a los PDF.
+SUPPORTED_FILE_EXTENSIONS = {
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".ppt",
+    ".pptx",
+    ".xls",
+    ".xlsx",
+    ".odt",
+    ".odp",
+    ".ods",
+    ".rtf",
+    ".txt",
+    ".csv",
 }
 
 # Preferencias de descarga
