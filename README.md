@@ -1,6 +1,6 @@
 # Aules PDF Synchronizer 1.1.51
 
-![Aules PDF Synchronizer foto](image.png)
+![Aules PDF Synchronizer foto](foto.png)
 
 Aplicación de escritorio para descargar y organizar automáticamente los materiales de tus asignaturas en Aules (Moodle de la Generalitat Valenciana).
 
