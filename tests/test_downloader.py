@@ -96,6 +96,48 @@ class DownloaderTests(unittest.TestCase):
         self.assertTrue(result.skipped)
         self.assertEqual(existing.read_bytes(), b"old version")
 
+    def test_updates_existing_file_only_when_requested(self):
+        destination = self.base / "notes.pdf"
+        destination.write_bytes(b"%PDF-1.4\nold version")
+        response = FakeResponse(
+            b"%PDF-1.7\nnew version",
+            {"Content-Type": "application/pdf"},
+            "https://aules.example/notes.pdf",
+        )
+
+        with patch.object(self.downloader.session, "get", return_value=response):
+            result = self.downloader.download(
+                "https://aules.example/notes.pdf",
+                destination,
+                overwrite_existing=True,
+            )
+
+        self.assertTrue(result.success)
+        self.assertTrue(result.replaced)
+        self.assertEqual(result.path, destination)
+        self.assertEqual(destination.read_bytes(), response.content)
+        self.assertEqual(list(self.base.glob("*.update")), [])
+
+    def test_keeps_existing_file_when_update_is_invalid(self):
+        destination = self.base / "notes.pdf"
+        destination.write_bytes(b"%PDF-1.4\nkeep this file")
+        response = FakeResponse(
+            b"not a pdf",
+            {"Content-Type": "application/pdf"},
+            "https://aules.example/notes.pdf",
+        )
+
+        result = self.downloader._save_response(
+            response,
+            destination,
+            cancel_check=None,
+            on_progress=None,
+            overwrite_existing=True,
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(destination.read_bytes(), b"%PDF-1.4\nkeep this file")
+
     def test_response_filename_uses_mime_type_when_header_has_no_filename(self):
         response = requests.Response()
         response.url = "https://aules.example/pluginfile.php/123"

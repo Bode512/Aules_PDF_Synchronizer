@@ -1,4 +1,4 @@
-# Aules PDF Synchronizer 1.1.50
+# Aules PDF Synchronizer 1.1.51
 
 ![Aules PDF Synchronizer foto](image.png)
 
@@ -7,6 +7,8 @@ Aplicación de escritorio para descargar y organizar automáticamente los materi
 ## Características
 
 - Interfaz moderna con CustomTkinter (tema claro/oscuro).
+- Recuerda opcionalmente las credenciales mediante el almacén cifrado de Windows.
+- Permite actualizar archivos existentes y comprobar actualizaciones del ejecutable.
 - Autenticación compatible con el flujo de Aules / GVA (modo visible para MFA o verificaciones adicionales).
 - Organización automática por asignatura y sección/tema.
 - Descarga y organización de archivos PDF, Word, PowerPoint, Excel, OpenDocument, RTF, TXT y CSV.
@@ -40,7 +42,8 @@ El ejecutable ya compilado se encuentra en `release/Aules_PDF_Synchronizer.exe`.
 Incluye Python y las dependencias de la aplicación, por lo que no hace falta
 instalar Python ni Selenium. Google Chrome debe estar instalado; se necesita
 conexión a Internet para descargar el controlador compatible y acceder a Aules.
-El `.exe` de esta versión también está disponible en [GitHub Releases](https://github.com/Bode512/Aules_PDF_Synchronizer/releases/tag/v1.1.50).
+El `.exe` se distribuye en [GitHub Releases](https://github.com/Bode512/Aules_PDF_Synchronizer/releases).
+Puede ejecutarse sin permisos de administrador desde una carpeta donde el usuario tenga permisos de escritura.
 
 Para compilarlo de nuevo en Windows:
 
@@ -61,6 +64,14 @@ La compilación genera `release/Aules_PDF_Synchronizer.exe`, con el icono de
 de Selenium que se cargan dinámicamente para evitar errores de importación en
 el ejecutable. La aplicación requiere Chrome; para completar MFA o CAPTCHA,
 utiliza el modo navegador visible.
+
+La opción «Recordar usuario y contraseña cifrada» guarda los datos en el
+Administrador de credenciales de Windows del usuario actual. La opción
+«Actualizar los archivos que ya existen» vuelve a descargar y reemplaza cada
+archivo solo después de validar el nuevo contenido. «Buscar actualizaciones»
+consulta GitHub Releases y reemplaza este ejecutable al cerrarse; para que no
+pida permisos de administrador, ejecútalo desde una carpeta escribible por tu
+usuario (por ejemplo, Documentos o Descargas), no desde `Program Files`.
 
 ## Preparar un release
 

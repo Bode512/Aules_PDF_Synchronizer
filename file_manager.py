@@ -87,6 +87,7 @@ def build_destination_path(
     course_name: str,
     section_name: Optional[str],
     filename: str,
+    unique: bool = True,
 ) -> Path:
     """
     Construye la ruta final siguiendo la estructura:
@@ -100,12 +101,12 @@ def build_destination_path(
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     final_path = dest_dir / file_safe
-    return ensure_unique_path(final_path)
+    return ensure_unique_path(final_path) if unique else final_path
 
 
-def create_temp_file(suffix: str = ".pdf") -> Path:
+def create_temp_file(suffix: str = ".pdf", directory: Optional[Path] = None) -> Path:
     """Crea un archivo temporal y devuelve su Path."""
-    fd, path = tempfile.mkstemp(suffix=suffix)
+    fd, path = tempfile.mkstemp(suffix=suffix, dir=str(directory) if directory else None)
     os.close(fd)
     return Path(path)
 

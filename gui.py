@@ -13,6 +13,14 @@ import customtkinter as ctk
 
 from aules_client import AulesClient, SyncStats
 from config import APP_VERSION, DEFAULT_BASE_URL
+from credential_store import delete_credentials, load_credentials, save_credentials
+from update_manager import (
+    ReleaseInfo,
+    check_for_update,
+    current_executable_path,
+    download_update,
+    schedule_update,
+)
 
 
 class AulesDownloaderApp(ctk.CTk):
@@ -31,9 +39,12 @@ class AulesDownloaderApp(ctk.CTk):
         self.worker: Optional[threading.Thread] = None
         self.client: Optional[AulesClient] = None
         self.is_running = False
+        self.update_in_progress = False
 
         self._build_ui()
+        self._load_saved_credentials()
         self.after(200, self._process_queue)
+        self.after(1000, lambda: self._check_updates(show_up_to_date=False))
 
     def _build_ui(self):
         # === Panel superior: autenticación ===
@@ -62,12 +73,22 @@ class AulesDownloaderApp(ctk.CTk):
         self.base_url_entry = ctk.CTkEntry(auth_frame, width=400)
         self.base_url_entry.insert(0, DEFAULT_BASE_URL)
         self.base_url_entry.grid(row=3, column=1, columnspan=2, sticky="w", padx=5, pady=4)
+        self.base_url_entry.bind("<FocusOut>", self._load_saved_credentials)
+        self.base_url_entry.bind("<Return>", self._load_saved_credentials)
+
+        self.remember_login_var = ctk.BooleanVar(value=True)
+        self.remember_login_cb = ctk.CTkCheckBox(
+            auth_frame,
+            text="Recordar usuario y contraseña cifrada en este equipo",
+            variable=self.remember_login_var,
+        )
+        self.remember_login_cb.grid(row=4, column=0, columnspan=3, sticky="w", padx=10, pady=4)
 
         self.headless_var = ctk.BooleanVar(value=False)
         self.headless_cb = ctk.CTkCheckBox(
             auth_frame, text="Modo headless (sin ventana de navegador)", variable=self.headless_var
         )
-        self.headless_cb.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=6)
+        self.headless_cb.grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=6)
 
         # === Destino ===
         dest_frame = ctk.CTkFrame(self)
@@ -88,6 +109,12 @@ class AulesDownloaderApp(ctk.CTk):
         ctk.CTkCheckBox(dest_frame, text="Crear carpeta si no existe", variable=self.create_dir_var).grid(
             row=2, column=0, sticky="w", padx=10, pady=4
         )
+        self.update_files_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            dest_frame,
+            text="Actualizar los archivos que ya existen",
+            variable=self.update_files_var,
+        ).grid(row=2, column=1, sticky="w", padx=10, pady=4)
 
         # === Controles ===
         ctrl_frame = ctk.CTkFrame(self)
@@ -103,6 +130,14 @@ class AulesDownloaderApp(ctk.CTk):
             command=self._cancel_sync, state="disabled"
         )
         self.cancel_btn.pack(side="left", padx=5, pady=10)
+
+        self.update_btn = ctk.CTkButton(
+            ctrl_frame,
+            text="Buscar actualizaciones",
+            width=160,
+            command=self._check_updates,
+        )
+        self.update_btn.pack(side="right", padx=5, pady=10)
 
         self.theme_btn = ctk.CTkButton(
             ctrl_frame, text="Tema claro/oscuro", width=140, command=self._toggle_theme
@@ -137,10 +172,141 @@ class AulesDownloaderApp(ctk.CTk):
     def _log(self, message: str):
         self.msg_queue.put(message)
 
+    def _load_saved_credentials(self, _event=None):
+        base_url = self.base_url_entry.get().strip()
+        if not base_url:
+            return
+        try:
+            saved = load_credentials(base_url)
+        except (OSError, UnicodeError) as error:
+            messagebox.showwarning(
+                "Credenciales guardadas",
+                f"No se pudieron leer las credenciales de Windows: {error}",
+            )
+            return
+        if saved and not self.username_entry.get() and not self.password_entry.get():
+            self.username_entry.insert(0, saved[0])
+            self.password_entry.insert(0, saved[1])
+            self.remember_login_var.set(True)
+
+    def _save_login_after_authentication(
+        self,
+        base_url: str,
+        username: str,
+        password: str,
+        remember: bool,
+    ):
+        try:
+            if remember:
+                save_credentials(base_url, username, password)
+                self._log("Credenciales guardadas cifradas en el almacén de Windows.")
+            else:
+                delete_credentials(base_url)
+                self._log("Se eliminaron las credenciales guardadas de este equipo.")
+        except OSError as error:
+            self._log(f"No se pudieron guardar las credenciales en Windows: {error}")
+
+    def _check_updates(self, show_up_to_date: bool = True):
+        if self.update_in_progress:
+            return
+        self.update_in_progress = True
+        self.update_btn.configure(state="disabled", text="Comprobando...")
+
+        def worker():
+            try:
+                release = check_for_update(APP_VERSION)
+                self.msg_queue.put(("UPDATE_CHECK", (release, show_up_to_date)))
+            except Exception as error:
+                self.msg_queue.put(("UPDATE_ERROR", str(error)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_update_check(
+        self,
+        result: tuple[Optional[ReleaseInfo], bool],
+    ):
+        release, show_up_to_date = result
+        self.update_in_progress = False
+        self.update_btn.configure(state="normal", text="Buscar actualizaciones")
+        if release is None:
+            if show_up_to_date:
+                messagebox.showinfo(
+                    "Actualizaciones",
+                    f"Ya tienes la versión más reciente ({APP_VERSION}).",
+                )
+            return
+
+        if self.is_running:
+            messagebox.showinfo(
+                "Actualización disponible",
+                "Hay una actualización disponible, pero espera a que termine la sincronización para instalarla.",
+            )
+            return
+
+        if current_executable_path() is None:
+            messagebox.showinfo(
+                "Actualización disponible",
+                f"Está disponible la versión {release.version}. "
+                "La actualización automática solo funciona con el .exe portable.",
+            )
+            return
+        if not messagebox.askyesno(
+            "Actualización disponible",
+            f"Está disponible la versión {release.version}. "
+            "¿Quieres descargarla e instalarla sobre este .exe?",
+        ):
+            return
+
+        self.update_in_progress = True
+        self.update_btn.configure(state="disabled", text="Descargando...")
+        self.start_btn.configure(state="disabled")
+        target = current_executable_path()
+
+        def worker():
+            staged = None
+            try:
+                staged = download_update(release, target)
+                schedule_update(staged, target, os.getpid())
+                self.msg_queue.put(("UPDATE_SCHEDULED", release.version))
+            except Exception as error:
+                self.msg_queue.put(("UPDATE_ERROR", str(error)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _check_update_result(self):
+        self.update_in_progress = False
+        self.update_btn.configure(state="normal", text="Buscar actualizaciones")
+        if not self.is_running:
+            self.start_btn.configure(state="normal")
+
     def _process_queue(self):
         try:
             while True:
                 msg = self.msg_queue.get_nowait()
+                if isinstance(msg, tuple):
+                    event, value = msg
+                    if event == "UPDATE_CHECK":
+                        self._handle_update_check(value)
+                    elif event == "UPDATE_ERROR":
+                        self._check_update_result()
+                        messagebox.showerror(
+                            "Error de actualización",
+                            f"No se pudo completar la actualización: {value}",
+                        )
+                    elif event == "UPDATE_SCHEDULED":
+                        self._check_update_result()
+                        messagebox.showinfo(
+                            "Actualización preparada",
+                            f"Se instalará la versión {value} al cerrar la aplicación. "
+                            "No hace falta permiso de administrador si la carpeta permite escritura.",
+                        )
+                        self.destroy()
+                    continue
+                if msg == "__DONE__":
+                    self._on_done()
+                    continue
+                if msg.startswith("__STATS__"):
+                    msg = msg[len("__STATS__"):]
                 self.log_text.configure(state="normal")
                 self.log_text.insert("end", msg + "\n")
                 self.log_text.see("end")
@@ -178,6 +344,9 @@ class AulesDownloaderApp(ctk.CTk):
         return None
 
     def _start_sync(self):
+        if self.update_in_progress:
+            messagebox.showinfo("Actualización", "Espera a que termine la comprobación o descarga de actualizaciones.")
+            return
         error = self._validate_inputs()
         if error:
             messagebox.showerror("Datos incompletos", error)
@@ -198,12 +367,18 @@ class AulesDownloaderApp(ctk.CTk):
         dest = self.dest_entry.get().strip()
         base_url = self.base_url_entry.get().strip()
         headless = self.headless_var.get()
+        remember_login = self.remember_login_var.get()
+        update_files = self.update_files_var.get()
 
         def worker():
             self.client = AulesClient(
                 base_url=base_url,
                 headless=headless,
                 log_callback=self._log,
+                on_authenticated=lambda: self._save_login_after_authentication(
+                    base_url, username, password, remember_login
+                ),
+                overwrite_existing=update_files,
             )
             stats = self.client.sync(username, password, dest)
             self.msg_queue.put("__STATS__" + self._format_stats(stats))
@@ -233,6 +408,7 @@ class AulesDownloaderApp(ctk.CTk):
             f"Secciones procesadas   : {stats.sections_processed}\n"
             f"Archivos encontrados   : {stats.files_found}\n"
             f"Descargados            : {stats.downloaded}\n"
+            f"Actualizados           : {stats.updated}\n"
             f"Omitidos (ya existían) : {stats.skipped_existing}\n"
             f"Fallidos               : {stats.failed}\n"
             f"Inaccesibles           : {stats.inaccessible}\n"
@@ -246,24 +422,6 @@ class AulesDownloaderApp(ctk.CTk):
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
         self.client = None
-
-    def _process_queue(self):
-        try:
-            while True:
-                msg = self.msg_queue.get_nowait()
-                if msg == "__DONE__":
-                    self._on_done()
-                    continue
-                if msg.startswith("__STATS__"):
-                    msg = msg[len("__STATS__"):]
-                self.log_text.configure(state="normal")
-                self.log_text.insert("end", msg + "\n")
-                self.log_text.see("end")
-                self.log_text.configure(state="disabled")
-        except queue.Empty:
-            pass
-        self.after(200, self._process_queue)
-
 
 # Necesario para la comprobación de permisos
 import os

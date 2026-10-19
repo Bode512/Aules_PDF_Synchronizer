@@ -32,7 +32,7 @@ from config import (
     SUPPORTED_FILE_EXTENSIONS,
 )
 from downloader import AuthenticatedDownloader, DownloadResult
-from file_manager import build_destination_path, sanitize_filename
+from file_manager import build_destination_path, ensure_unique_path, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ class SyncStats:
     skipped_existing: int = 0
     failed: int = 0
     inaccessible: int = 0
+    updated: int = 0
     cancelled: bool = False
     destination: str = ""
     error: Optional[str] = None
@@ -77,10 +78,14 @@ class AulesClient:
         base_url: str = DEFAULT_BASE_URL,
         headless: bool = False,
         log_callback: Optional[Callable[[str], None]] = None,
+        on_authenticated: Optional[Callable[[], None]] = None,
+        overwrite_existing: bool = False,
     ):
         self.base_url = base_url.rstrip("/") + "/"
         self.headless = headless
         self.log = log_callback or (lambda msg: logger.info(msg))
+        self.on_authenticated = on_authenticated
+        self.overwrite_existing = overwrite_existing
         self.driver: Optional[webdriver.Chrome] = None
         self.downloader: Optional[AuthenticatedDownloader] = None
         self._cancel_requested = False
@@ -167,6 +172,8 @@ class AulesClient:
         if self._is_logged_in():
             self._emit("Autenticación completada.")
             self._init_downloader()
+            if self.on_authenticated:
+                self.on_authenticated()
             return True
 
         # Posible redirección a identidad GVA / Cl@ve / MFA
@@ -187,6 +194,8 @@ class AulesClient:
             if self._is_logged_in():
                 self._emit("Autenticación completada (intervención manual).")
                 self._init_downloader()
+                if self.on_authenticated:
+                    self.on_authenticated()
                 return True
             time.sleep(1.5)
 
@@ -383,6 +392,7 @@ class AulesClient:
                 course for course in courses if not self._is_orientation_course(course.name)
             ]
             stats.courses_analyzed = len(courses)
+            destinations_seen = set()
 
             for course in courses:
                 if self.is_cancelled():
@@ -404,22 +414,30 @@ class AulesClient:
 
                     self._emit(f"Descargando: {res.name}")
                     final_path = build_destination_path(
-                        base, res.course_name, res.section, res.name
+                        base, res.course_name, res.section, res.name, unique=False
                     )
+                    if final_path in destinations_seen:
+                        final_path = ensure_unique_path(final_path)
+                    destinations_seen.add(final_path)
 
                     result: DownloadResult = self.downloader.download(
                         res.url,
                         final_path,
                         cancel_check=self.is_cancelled,
                         on_progress=lambda m: self._emit(m),
+                        overwrite_existing=self.overwrite_existing,
                     )
 
                     if result.skipped:
                         self._emit(f"Archivo existente, se omite: {res.name}")
                         stats.skipped_existing += 1
                     elif result.success:
-                        self._emit(f"Descarga completada: {res.name}")
-                        stats.downloaded += 1
+                        if result.replaced:
+                            self._emit(f"Archivo actualizado: {res.name}")
+                            stats.updated += 1
+                        else:
+                            self._emit(f"Descarga completada: {res.name}")
+                            stats.downloaded += 1
                     else:
                         self._emit(f"Error al descargar {res.name}: {result.error}")
                         if "denegado" in (result.error or "").lower() or "caducada" in (result.error or "").lower():

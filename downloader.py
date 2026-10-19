@@ -4,6 +4,7 @@ Descargas HTTP fiables con sesión autenticada, validación de PDF y reintentos.
 
 import logging
 import mimetypes
+import os
 import time
 from email.message import Message
 from html.parser import HTMLParser
@@ -24,7 +25,6 @@ from config import (
 from file_manager import (
     create_temp_file,
     ensure_unique_path,
-    move_temp_to_final,
     cleanup_temp,
     sanitize_filename,
 )
@@ -53,12 +53,14 @@ class DownloadResult:
         skipped: bool = False,
         error: Optional[str] = None,
         size: int = 0,
+        replaced: bool = False,
     ):
         self.success = success
         self.path = path
         self.skipped = skipped
         self.error = error
         self.size = size
+        self.replaced = replaced
 
 
 class AuthenticatedDownloader:
@@ -161,6 +163,7 @@ class AuthenticatedDownloader:
         dest_path: Path,
         cancel_check: Optional[Callable[[], bool]],
         on_progress: Optional[Callable[[str], None]],
+        overwrite_existing: bool,
     ) -> DownloadResult:
         if response.status_code in (401, 403):
             if on_progress:
@@ -191,11 +194,16 @@ class AuthenticatedDownloader:
             )
 
         requested_path = dest_path.parent / filename
-        if requested_path.exists() and requested_path.stat().st_size > 0:
+        if (
+            requested_path.exists()
+            and requested_path.stat().st_size > 0
+            and not overwrite_existing
+        ):
             return DownloadResult(success=True, path=requested_path, skipped=True)
-        final_path = ensure_unique_path(requested_path)
+        replaced = overwrite_existing and requested_path.exists()
+        final_path = requested_path if overwrite_existing else ensure_unique_path(requested_path)
 
-        temp_path = create_temp_file(extension)
+        temp_path = create_temp_file(extension, directory=final_path.parent)
         try:
             size = 0
             with open(temp_path, "wb") as file:
@@ -212,8 +220,13 @@ class AuthenticatedDownloader:
                     error=f"El contenido descargado no es un archivo {extension} válido.",
                 )
 
-            move_temp_to_final(temp_path, final_path)
-            return DownloadResult(success=True, path=final_path, size=size)
+            os.replace(temp_path, final_path)
+            return DownloadResult(
+                success=True,
+                path=final_path,
+                size=size,
+                replaced=replaced,
+            )
         finally:
             cleanup_temp(temp_path)
 
@@ -223,14 +236,19 @@ class AuthenticatedDownloader:
         dest_path: Path,
         cancel_check: Optional[Callable[[], bool]] = None,
         on_progress: Optional[Callable[[str], None]] = None,
+        overwrite_existing: bool = False,
     ) -> DownloadResult:
         """
         Descarga un recurso a dest_path.
-        - Si el archivo ya existe, se omite.
+        - Si el archivo ya existe, se omite salvo que se solicite actualizarlo.
         - Descarga a temporal y valida la firma según la extensión.
         - Reintentos con backoff.
         """
-        if dest_path.exists() and dest_path.stat().st_size > 0:
+        if (
+            dest_path.exists()
+            and dest_path.stat().st_size > 0
+            and not overwrite_existing
+        ):
             return DownloadResult(success=True, path=dest_path, skipped=True)
 
         if cancel_check and cancel_check():
@@ -262,6 +280,7 @@ class AuthenticatedDownloader:
                             dest_path,
                             cancel_check,
                             on_progress,
+                            overwrite_existing,
                         )
                     if resp.status_code >= 400:
                         raise requests.HTTPError(f"HTTP {resp.status_code}")
@@ -282,6 +301,7 @@ class AuthenticatedDownloader:
                             dest_path,
                             cancel_check,
                             on_progress,
+                            overwrite_existing,
                         )
 
                 with self.session.get(
@@ -295,6 +315,7 @@ class AuthenticatedDownloader:
                         dest_path,
                         cancel_check,
                         on_progress,
+                        overwrite_existing,
                     )
 
             except Exception as e:
