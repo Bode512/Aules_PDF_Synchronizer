@@ -256,15 +256,18 @@ class AuthenticatedDownloader:
                     timeout=REQUEST_TIMEOUT,
                     allow_redirects=True,
                 ) as resp:
+                    if resp.status_code in (401, 403):
+                        return self._save_response(
+                            resp,
+                            dest_path,
+                            cancel_check,
+                            on_progress,
+                        )
+                    if resp.status_code >= 400:
+                        raise requests.HTTPError(f"HTTP {resp.status_code}")
+
                     content_type = resp.headers.get("Content-Type", "").lower()
                     if "text/html" in content_type:
-                        if resp.status_code in (401, 403):
-                            return self._save_response(
-                                resp,
-                                dest_path,
-                                cancel_check,
-                                on_progress,
-                            )
                         file_url = self._find_file_url(resp.text, resp.url)
                         if not file_url:
                             return DownloadResult(

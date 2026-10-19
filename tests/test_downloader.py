@@ -178,6 +178,30 @@ class DownloaderTests(unittest.TestCase):
             any("Esperando 2 s" in message and "temporary network failure" in message for message in progress)
         )
 
+    def test_reports_access_denied_without_retry_wait(self):
+        response = FakeResponse(
+            b"",
+            {"Content-Type": "application/pdf"},
+            "https://aules.example/private.pdf",
+        )
+        response.status_code = 403
+        progress = []
+        with (
+            patch.object(self.downloader.session, "get", return_value=response) as get,
+            patch("downloader.time.sleep") as sleep,
+        ):
+            result = self.downloader.download(
+                response.url,
+                build_destination_path(self.base, "History", "Unit 2", "private.pdf"),
+                on_progress=progress.append,
+            )
+
+        self.assertFalse(result.success)
+        self.assertIn("Acceso denegado", result.error)
+        self.assertEqual(get.call_count, 1)
+        sleep.assert_not_called()
+        self.assertTrue(any("no se reintenta" in message for message in progress))
+
 
 if __name__ == "__main__":
     unittest.main()

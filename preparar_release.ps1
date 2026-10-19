@@ -41,31 +41,36 @@ try {
         throw "La versión $tag ya existe y hay cambios. Actualiza APP_VERSION antes de preparar otro release."
     }
 
-    $latestTag = git tag --list "v*" --sort=-version:refname | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0) {
+    $tagList = @(git tag --list "v*" --sort=-version:refname)
+    $tagListExitCode = $LASTEXITCODE
+    if ($tagListExitCode -ne 0) {
         throw "No se pudieron consultar las etiquetas de Git."
     }
+    $latestTag = $tagList | Select-Object -First 1
 
     $hasChanges = $false
     if ($latestTag) {
         git diff --quiet "$latestTag" HEAD --
-        if ($LASTEXITCODE -gt 1) {
+        $comparisonExitCode = $LASTEXITCODE
+        if ($comparisonExitCode -gt 1) {
             throw "No se pudieron comparar los cambios con $latestTag."
         }
-        $hasChanges = $LASTEXITCODE -ne 0
+        $hasChanges = $comparisonExitCode -ne 0
 
         git diff --quiet HEAD --
-        if ($LASTEXITCODE -gt 1) {
+        $workingTreeExitCode = $LASTEXITCODE
+        if ($workingTreeExitCode -gt 1) {
             throw "No se pudieron comprobar los cambios locales."
         }
-        $hasChanges = $hasChanges -or ($LASTEXITCODE -ne 0)
+        $hasChanges = $hasChanges -or ($workingTreeExitCode -ne 0)
     }
     else {
         git diff --quiet HEAD --
-        if ($LASTEXITCODE -gt 1) {
+        $workingTreeExitCode = $LASTEXITCODE
+        if ($workingTreeExitCode -gt 1) {
             throw "No se pudieron comprobar los cambios locales."
         }
-        $hasChanges = $LASTEXITCODE -ne 0
+        $hasChanges = $workingTreeExitCode -ne 0
     }
 
     $untrackedFiles = @(git ls-files --others --exclude-standard)

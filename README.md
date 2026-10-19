@@ -58,6 +58,19 @@ La compilación genera `release/Aules_PDF_Synchronizer.exe`, con el icono de
 `image.png` convertido a `image.ico`. La aplicación requiere Chrome; para
 completar MFA o CAPTCHA, utiliza el modo navegador visible.
 
+## Preparar un release
+
+Después de actualizar `APP_VERSION` en `config.py`, ejecuta:
+
+```powershell
+.\preparar_release.ps1
+```
+
+El script comprueba si hay cambios desde el último tag, ejecuta las pruebas y
+compila el `.exe` únicamente si los hay. No crea commits, tags ni publica en
+GitHub. Durante las descargas muestra la cuenta atrás y el motivo de cada
+reintento; los errores de permisos se notifican inmediatamente.
+
 **Cómo funciona la autenticación y la sincronización**
 
 1. Se abre Chrome (visible o headless) y se navega a `{BASE_URL}/login/index.php`.
