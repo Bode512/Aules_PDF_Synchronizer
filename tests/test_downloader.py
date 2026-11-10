@@ -244,6 +244,53 @@ class DownloaderTests(unittest.TestCase):
         sleep.assert_not_called()
         self.assertTrue(any("no se reintenta" in message for message in progress))
 
+    def test_downloads_image_from_humans_resource(self):
+        cases = [
+            ("IMG_Muslo antero lateral.jpg", b"\xff\xd8\xff\xe0exif-data", "image/jpeg"),
+            ("diagrama esquema.png", b"\x89PNG\r\n\x1a\nimage-data", "image/png"),
+            ("animacion.gif", b"GIF89a.gif-data", "image/gif"),
+        ]
+        for filename, content, content_type in cases:
+            with self.subTest(filename=filename):
+                encoded = filename.replace(" ", "%20")
+                response = FakeResponse(
+                    content,
+                    {"Content-Type": content_type},
+                    f"https://aules.example/pluginfile.php/8694271/mod_resource/content/1/{encoded}",
+                )
+                destination = build_destination_path(self.base, "Anatomía", "Tema 3", "imagen")
+                with patch.object(self.downloader.session, "get", return_value=response):
+                    result = self.downloader.download(response.url, destination)
+
+                self.assertTrue(result.success)
+                self.assertEqual(result.path.name, filename)
+                self.assertEqual(result.path.read_bytes(), content)
+
+    def test_filenames_with_accents_are_written_correctly(self):
+        # Mojibake de doble codificación: "AnÃ¡lisis" debe guardar como "Análisis"
+        mojibake = "Análisis de movilidad.pdf".encode("utf-8").decode("cp1252")
+        cases = [
+            ('filename="Análisis%20de%20movilidad.pdf"', "Análisis de movilidad.pdf"),
+            ("filename*=UTF-8''An%C3%A1lisis%20de%20movilidad.pdf", "Análisis de movilidad.pdf"),
+            (f'filename="{mojibake}"', "Análisis de movilidad.pdf"),
+            ("filename*=UTF-8''An%C3%83%C2%A1lisis.pdf", "Análisis.pdf"),
+        ]
+        for header, expected in cases:
+            with self.subTest(header=header):
+                self.assertEqual(
+                    AuthenticatedDownloader._content_disposition_filename(header),
+                    expected,
+                )
+
+    def test_accents_from_url_are_not_mangled(self):
+        response = requests.Response()
+        response.url = "https://aules.example/pluginfile.php/12/mod_resource/content/1/Composici%C3%B3n%20del%20movil.jpg"
+        response.headers["Content-Type"] = "image/jpeg"
+        self.assertEqual(
+            self.downloader._response_filename(response, "recurso"),
+            "Composición del movil.jpg",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

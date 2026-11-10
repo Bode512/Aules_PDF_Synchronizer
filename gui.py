@@ -40,6 +40,7 @@ class AulesDownloaderApp(ctk.CTk):
         self.client: Optional[AulesClient] = None
         self.is_running = False
         self.update_in_progress = False
+        self.course_selection: Optional[list] = None
 
         self._build_ui()
         self._load_saved_credentials()
@@ -89,6 +90,14 @@ class AulesDownloaderApp(ctk.CTk):
             auth_frame, text="Modo headless (sin ventana de navegador)", variable=self.headless_var
         )
         self.headless_cb.grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=6)
+
+        self.choose_courses_var = ctk.BooleanVar(value=True)
+        self.choose_courses_cb = ctk.CTkCheckBox(
+            auth_frame,
+            text="Elegir asignaturas antes de descargar (solo baja lo que selecciones)",
+            variable=self.choose_courses_var,
+        )
+        self.choose_courses_cb.grid(row=5, column=2, sticky="w", padx=10, pady=6)
 
         # === Destino ===
         dest_frame = ctk.CTkFrame(self)
@@ -206,6 +215,65 @@ class AulesDownloaderApp(ctk.CTk):
         except OSError as error:
             self._log(f"No se pudieron guardar las credenciales en Windows: {error}")
 
+    def _choose_courses(self, courses):
+        """
+        Callable que invoca el hilo de sincronización tras el login.
+        Abre el selector en el hilo principal (vía cola) y espera la respuesta.
+        Devuelve la lista elegida o None para todas.
+        """
+        selection_event = threading.Event()
+        self.course_selection = None  # None = todas (fallback)
+        self.msg_queue.put(("CHOOSE_COURSES", (courses, selection_event)))
+        selection_event.wait()
+        return self.course_selection
+
+    def _handle_choose_courses(self, value):
+        courses, selection_event = value
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Elegir asignaturas")
+        dialog.geometry("480x600")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ctk.CTkLabel(
+            dialog,
+            text="Selecciona las asignaturas a descargar:",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 4))
+
+        list_frame = ctk.CTkScrollableFrame(dialog)
+        list_frame.pack(fill="both", expand=True, padx=12, pady=4)
+
+        vars_by_course = []
+        for course in courses:
+            var = ctk.BooleanVar(value=True)
+            ctk.CTkCheckBox(
+                list_frame, text=course.name, variable=var, wraplength=400
+            ).pack(anchor="w", padx=8, pady=3)
+            vars_by_course.append((course, var))
+
+        def select_all(value: bool):
+            for _, var in vars_by_course:
+                var.set(value)
+
+        def confirm(_event=None):
+            self.course_selection = [
+                course for course, var in vars_by_course if var.get()
+            ]
+            dialog.grab_release()
+            dialog.destroy()
+            selection_event.set()
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=12, pady=(4, 12))
+        ctk.CTkButton(buttons, text="Marcar todas", width=120, command=lambda: select_all(True)).pack(side="left", padx=4)
+        ctk.CTkButton(buttons, text="Desmarcar todas", width=130, command=lambda: select_all(False)).pack(side="left", padx=4)
+        ctk.CTkButton(buttons, text="Confirmar", width=140, command=confirm).pack(side="right", padx=4)
+        dialog.bind("<Return>", confirm)
+        # Cerrar la ventana equivale a descargar todas (evita bloquear el hilo de sincronización)
+        dialog.protocol("WM_DELETE_WINDOW", confirm)
+
     def _check_updates(self, show_up_to_date: bool = True):
         if self.update_in_progress:
             return
@@ -293,6 +361,9 @@ class AulesDownloaderApp(ctk.CTk):
                             "Error de actualización",
                             f"No se pudo completar la actualización: {value}",
                         )
+                    elif event == "CHOOSE_COURSES":
+                        self._handle_choose_courses(value)
+                        continue
                     elif event == "UPDATE_SCHEDULED":
                         self._check_update_result()
                         messagebox.showinfo(
@@ -379,6 +450,7 @@ class AulesDownloaderApp(ctk.CTk):
                     base_url, username, password, remember_login
                 ),
                 overwrite_existing=update_files,
+                course_picker=self._choose_courses if self.choose_courses_var.get() else None,
             )
             stats = self.client.sync(username, password, dest)
             self.msg_queue.put("__STATS__" + self._format_stats(stats))
@@ -404,6 +476,7 @@ class AulesDownloaderApp(ctk.CTk):
         return (
             f"\n========== RESUMEN ({status}) ==========\n"
             f"Asignaturas analizadas : {stats.courses_analyzed}\n"
+            f"Asignaturas elegidas   : {stats.courses_selected or '—'}\n"
             f"Orientación omitida    : {stats.orientation_courses_skipped}\n"
             f"Secciones procesadas   : {stats.sections_processed}\n"
             f"Archivos encontrados   : {stats.files_found}\n"

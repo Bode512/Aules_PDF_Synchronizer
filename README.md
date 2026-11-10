@@ -1,4 +1,4 @@
-# Aules PDF Synchronizer 1.1.51
+# Aules PDF Synchronizer 1.1.52
 
 ![Aules PDF Synchronizer foto](foto.png)
 
@@ -12,7 +12,10 @@ Aplicación de escritorio para descargar y organizar automáticamente los materi
 - Autenticación compatible con el flujo de Aules / GVA (modo visible para MFA o verificaciones adicionales).
 - Organización automática por asignatura y sección/tema.
 - Descarga y organización de archivos PDF, Word, PowerPoint, Excel, OpenDocument, RTF, TXT y CSV.
+- Descarga de imágenes de los apuntes (JPG, JPEG, PNG, GIF, WEBP, BMP y SVG).
 - Mantiene el nombre y la extensión original del archivo descargado.
+- Escribe correctamente los nombres con tildes y espacios (decodifica %20, RFC 5987 y corrige nombres con codificación doble de Moodle).
+- Selector de asignaturas: elige qué asignaturas descargar antes de empezar (descarga más rápida).
 - Omite las asignaturas cuyo nombre contiene «Orientación».
 - Evita duplicados (no redescarga archivos existentes).
 - Descargas autenticadas, validación de archivos y reintentos.

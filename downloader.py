@@ -5,8 +5,8 @@ Descargas HTTP fiables con sesión autenticada, validación de PDF y reintentos.
 import logging
 import mimetypes
 import os
+import re
 import time
-from email.message import Message
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional, Callable
@@ -87,18 +87,60 @@ class AuthenticatedDownloader:
             )
 
     @staticmethod
-    def _response_filename(response: requests.Response, fallback: str) -> str:
+    def _decode_filename(raw: str) -> str:
+        """
+        Decodifica un nombre de archivo de Moodle (Content-Disposition o URL):
+        - deshace el %20 / %C3%A1 (percent-encoding UTF-8),
+        - corrige el mojibake de doble codificación ("Ã¡" -> "á", "AnÃ¡lisis" -> "Análisis").
+        """
+        name = unquote(raw.strip().strip('"'))
+        if not name:
+            return name
+        # Moodle a veces envía UTF-8 doblemente codificado: los acentos llegan como Ã¡, Ã©, Ã­...
+        if re.search(r"[ÃÂ]", name):
+            for encoding in ("cp1252", "latin-1"):
+                try:
+                    fixed = name.encode(encoding).decode("utf-8")
+                except (UnicodeEncodeError, UnicodeDecodeError):
+                    continue
+                if fixed and not re.search(r"[ÃÂ]", fixed):
+                    name = fixed
+                    break
+        return name
+
+    @classmethod
+    def _content_disposition_filename(cls, content_disposition: str) -> Optional[str]:
+        """
+        Extrae el nombre del header Content-Disposition soportando:
+        filename="..." (con %20), filename*=UTF-8''... (RFC 5987) y variantes de Moodle.
+        """
+        # RFC 5987: filename*=UTF-8''Tema%201.pdf (prioridad)
+        match = re.search(
+            r"filename\*\s*=\s*(?P<charset>[^']*)''(?P<value>[^;]+)",
+            content_disposition,
+            re.IGNORECASE,
+        )
+        if match:
+            charset = (match.group("charset").strip() or "utf-8").lower()
+            return cls._decode_filename(
+                unquote(match.group("value"), encoding=charset, errors="replace")
+            )
+
+        match = re.search(r'filename\s*=\s*"?([^";]+)"?', content_disposition, re.IGNORECASE)
+        if match:
+            return cls._decode_filename(match.group(1))
+        return None
+
+    @classmethod
+    def _response_filename(cls, response: requests.Response, fallback: str) -> str:
         content_disposition = response.headers.get("Content-Disposition", "")
         if content_disposition:
-            disposition = Message()
-            disposition["content-disposition"] = content_disposition
-            filename = disposition.get_filename()
+            filename = cls._content_disposition_filename(content_disposition)
             if filename:
-                filename = unquote(filename)
                 if Path(filename).suffix.lower() in SUPPORTED_FILE_EXTENSIONS:
                     return sanitize_filename(Path(filename).name)
 
-        url_name = unquote(Path(urlparse(response.url).path).name)
+        url_name = cls._decode_filename(Path(urlparse(response.url).path).name)
         if Path(url_name).suffix.lower() in SUPPORTED_FILE_EXTENSIONS:
             return sanitize_filename(url_name)
 
@@ -110,6 +152,14 @@ class AuthenticatedDownloader:
         extension = mimetypes.guess_extension(content_type) if content_type else None
         if content_type == "application/rtf":
             extension = ".rtf"
+        if content_type == "image/jpeg":
+            extension = ".jpg"
+        if content_type == "image/png":
+            extension = ".png"
+        if content_type == "image/gif":
+            extension = ".gif"
+        if content_type == "image/webp":
+            extension = ".webp"
         if extension in SUPPORTED_FILE_EXTENSIONS:
             return sanitize_filename(f"{fallback_name}.{extension.lstrip('.')}")
         return fallback_name
@@ -124,6 +174,18 @@ class AuthenticatedDownloader:
 
         if extension == ".pdf":
             return signature.startswith(b"%PDF")
+        if extension in {".jpg", ".jpeg"}:
+            return signature.startswith(b"\xff\xd8\xff")
+        if extension == ".png":
+            return signature.startswith(b"\x89PNG\r\n\x1a\n")
+        if extension == ".gif":
+            return signature.startswith(b"GIF8")
+        if extension == ".webp":
+            return signature.startswith(b"RIFF") and content[8:12] == b"WEBP"
+        if extension == ".bmp":
+            return signature.startswith(b"BM")
+        if extension == ".svg":
+            return content.lstrip()[:1] == b"<" or content[:16].startswith(b"<?xml")
         if extension in {".doc", ".ppt", ".xls"}:
             return signature.startswith(bytes.fromhex("D0CF11E0A1B11AE1"))
         if extension in {".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods"}:

@@ -55,6 +55,7 @@ class CourseInfo:
 @dataclass
 class SyncStats:
     courses_analyzed: int = 0
+    courses_selected: int = 0
     orientation_courses_skipped: int = 0
     sections_processed: int = 0
     files_found: int = 0
@@ -80,12 +81,16 @@ class AulesClient:
         log_callback: Optional[Callable[[str], None]] = None,
         on_authenticated: Optional[Callable[[], None]] = None,
         overwrite_existing: bool = False,
+        course_picker: Optional[Callable[[List["CourseInfo"]], Optional[List["CourseInfo"]]]] = None,
     ):
         self.base_url = base_url.rstrip("/") + "/"
         self.headless = headless
         self.log = log_callback or (lambda msg: logger.info(msg))
         self.on_authenticated = on_authenticated
         self.overwrite_existing = overwrite_existing
+        # Callback opcional para elegir asignaturas: recibe la lista completa y
+        # devuelve la selección elegida (o None para procesar todas).
+        self.course_picker = course_picker
         self.driver: Optional[webdriver.Chrome] = None
         self.downloader: Optional[AuthenticatedDownloader] = None
         self._cancel_requested = False
@@ -391,6 +396,30 @@ class AulesClient:
             courses = [
                 course for course in courses if not self._is_orientation_course(course.name)
             ]
+
+            # Selección previa de asignaturas (descarga solo lo elegido: más rápido)
+            if self.course_picker and courses:
+                self._emit("Abriendo selector de asignaturas...")
+                chosen = self.course_picker(courses)
+                if self.is_cancelled():
+                    stats.cancelled = True
+                    self._emit("Sincronización cancelada.")
+                    return stats
+                if chosen is None:
+                    stats.courses_selected = len(courses)
+                    self._emit("Se descargarán todas las asignaturas.")
+                elif not chosen:
+                    self._emit("No se seleccionó ninguna asignatura; no hay nada que descargar.")
+                    stats.courses_selected = 0
+                    return stats
+                else:
+                    stats.courses_selected = len(chosen)
+                    self._emit(
+                        f"Descargando {len(chosen)} de {len(courses)} asignaturas "
+                        f"({len(courses) - len(chosen)} omitidas por selección)."
+                    )
+                    courses = list(chosen)
+
             stats.courses_analyzed = len(courses)
             destinations_seen = set()
 
