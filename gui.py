@@ -235,6 +235,7 @@ class AulesDownloaderApp(ctk.CTk):
         dialog.geometry("480x600")
         dialog.transient(self)
         dialog.grab_set()
+        dialog.lift()
 
         ctk.CTkLabel(
             dialog,
@@ -242,16 +243,10 @@ class AulesDownloaderApp(ctk.CTk):
             font=ctk.CTkFont(size=15, weight="bold"),
         ).pack(anchor="w", padx=12, pady=(12, 4))
 
-        list_frame = ctk.CTkScrollableFrame(dialog)
+        list_frame = ctk.CTkScrollableFrame(dialog, width=430, height=430)
         list_frame.pack(fill="both", expand=True, padx=12, pady=4)
 
         vars_by_course = []
-        for course in courses:
-            var = ctk.BooleanVar(value=True)
-            ctk.CTkCheckBox(
-                list_frame, text=course.name, variable=var, wraplength=400
-            ).pack(anchor="w", padx=8, pady=3)
-            vars_by_course.append((course, var))
 
         def select_all(value: bool):
             for _, var in vars_by_course:
@@ -261,9 +256,35 @@ class AulesDownloaderApp(ctk.CTk):
             self.course_selection = [
                 course for course, var in vars_by_course if var.get()
             ]
-            dialog.grab_release()
-            dialog.destroy()
+            try:
+                dialog.grab_release()
+                dialog.destroy()
+            except Exception:
+                pass
             selection_event.set()
+
+        def build_course_list():
+            """Crea los checkboxes cuando la ventana ya está dibujada en pantalla.
+
+            CustomTkinter no renderiza los widgets creados dentro de un
+            CTkScrollableFrame antes de que la ventana se mapee, así que la
+            construcción se difiere un ciclo del bucle de eventos. El nombre
+            va en una etiqueta porque CTkCheckBox no soporta wraplength.
+            """
+            for course in courses:
+                row = ctk.CTkFrame(list_frame, fg_color="transparent")
+                row.pack(anchor="w", padx=8, pady=2, fill="x")
+                var = ctk.BooleanVar(value=True)
+                checkbox = ctk.CTkCheckBox(row, text="", variable=var, width=24)
+                checkbox.pack(side="left", anchor="n", pady=(3, 0))
+                # CTkCheckBox no admite wraplength: el nombre va en una etiqueta con salto de línea
+                label = ctk.CTkLabel(
+                    row, text=course.name, wraplength=370, justify="left", cursor="hand2"
+                )
+                label.pack(side="left", padx=(4, 0), anchor="w")
+                label.bind("<Button-1>", lambda _event, box=checkbox: box.toggle())
+                vars_by_course.append((course, var))
+            list_frame.update_idletasks()
 
         buttons = ctk.CTkFrame(dialog, fg_color="transparent")
         buttons.pack(fill="x", padx=12, pady=(4, 12))
@@ -273,6 +294,9 @@ class AulesDownloaderApp(ctk.CTk):
         dialog.bind("<Return>", confirm)
         # Cerrar la ventana equivale a descargar todas (evita bloquear el hilo de sincronización)
         dialog.protocol("WM_DELETE_WINDOW", confirm)
+
+        # La lista se difiere unos ms hasta que el Toplevel esté dibujado (customtkinter no la renderiza antes)
+        dialog.after(120, build_course_list)
 
     def _check_updates(self, show_up_to_date: bool = True):
         if self.update_in_progress:

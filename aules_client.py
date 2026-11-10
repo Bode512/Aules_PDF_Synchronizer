@@ -288,6 +288,7 @@ class AulesClient:
 
         resources: List[ResourceInfo] = []
         seen_urls = set()
+        seen_names = set()
 
         # Intentar recorrer secciones
         sections = self.driver.find_elements(By.CSS_SELECTOR, SELECTORS["section"])
@@ -314,23 +315,40 @@ class AulesClient:
             except Exception:
                 links = []
 
-            for link in links:
+            # También imágenes incrustadas en la asignatura (descripciones,
+            # resúmenes de sección, etiquetas...): no son <a>, son <img src=...>
+            try:
+                images = section_el.find_elements(
+                    By.CSS_SELECTOR, SELECTORS.get("embedded_image", "img[src*='pluginfile.php']")
+                )
+            except Exception:
+                images = []
+
+            for element in links + images:
                 try:
-                    href = link.get_attribute("href") or ""
-                    text = (link.text or "").strip()
+                    href = element.get_attribute("href") or element.get_attribute("src") or ""
+                    # Para <a> usamos el texto del enlace; para <img>, el atributo alt
+                    text = (element.get_attribute("alt") or element.text or "").strip()
                     if not href or href in seen_urls:
                         continue
                     url_extension = Path(unquote(urlparse(href).path)).suffix.lower()
                     text_extension = Path(text).suffix.lower()
                     is_moodle_resource = "/mod/resource/view.php" in href
+                    is_pluginfile = "pluginfile" in href
                     if not (
-                        url_extension in SUPPORTED_FILE_EXTENSIONS
+                        (url_extension in SUPPORTED_FILE_EXTENSIONS and is_pluginfile)
                         or text_extension in SUPPORTED_FILE_EXTENSIONS
                         or is_moodle_resource
                     ):
                         continue
 
                     name = text or self._guess_filename_from_url(href) or "recurso"
+
+                    # Evitar descargar dos veces el mismo archivo si aparece repetido
+                    file_key = sanitize_filename(name)
+                    if file_key in seen_names:
+                        continue
+                    seen_names.add(file_key)
 
                     seen_urls.add(href)
                     resources.append(

@@ -12,7 +12,7 @@ Ajusta aquí URLs, selectores y preferencias cuando cambie la estructura de Aule
 #   https://aules.edu.gva.es/primaria/
 #   etc. (ver portal.edu.gva.es/aules)
 DEFAULT_BASE_URL = "https://aules.edu.gva.es/batxillerat/"
-APP_VERSION = "1.1.52"
+APP_VERSION = "1.1.53"
 
 # Rutas relativas habituales de Moodle
 LOGIN_PATH = "login/index.php"
@@ -43,6 +43,8 @@ SELECTORS = {
     "activity": ".activity, .activity-item, [data-region='activity-item']",
     "resource_link": "a[href*='/mod/resource/view.php'], a[href*='pluginfile.php']",
     "file_link": "a[href*='pluginfile.php'], a[href*='forcedownload=1']",
+    # Imágenes incrustadas en la asignatura (no son enlaces, son <img>)
+    "embedded_image": "img[src*='pluginfile.php']",
 }
 
 # Formatos de recursos que se guardan (documentos + imágenes de los apuntes).
